@@ -18,6 +18,9 @@ class B:
         self.c = 1
         self.a = C()
 
+    def d(self, n):
+        print(n)
+
     def b(self):
         print(1)
 
