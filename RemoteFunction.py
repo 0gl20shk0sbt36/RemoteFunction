@@ -1,26 +1,12 @@
 """
-本模块目前可以进行远程函数调用，远程变量获取、修改、删除，方法和正常的函数调用一样
+本模块目前可以进行远程函数调用，远程变量获取方法和正常的函数调用一样
 """
 
-
-from socket import socket, AF_INET, SOCK_STREAM, SO_REUSEADDR, SOL_SOCKET
+from socket import socket, AF_INET, SOCK_STREAM, SO_REUSEADDR, SOL_SOCKET, timeout
 from time import time, sleep
 from threading import Thread
 from json import loads, dumps
 from typing import Union
-
-
-# 注：暂未完成模式开发
-# READ_ONLY = 'READ_ONLY'  # 只读模式
-# SECURITY = 'SECURITY'  # 安全模式
-# TRUST = 'TRUST'  # 信任模式
-# SYSDBA = 'SYSDBA'  # 最高权限模式
-# modules = ['READ_ONLY', 'SECURITY', 'TRUST', 'SYSDBA']
-# # READ_ONLY:   只读模式         该模式可以获取子类公有变量
-# # SECURITY:    安全模式         该模式可以获取、修改、删除子类公有变量(不包括单下划线开头的)
-# # TRUST:       信任模式         该模式可以获取、修改、删除任意子类变量(不包括基类变量)
-# # SYSDBA:      最高权限模式      该模式可以获取、修改、删除任意变量
-# # 所有模式都可以调用类方法
 
 
 class SendAllTypeError(Exception):
@@ -98,48 +84,35 @@ class LongRangeError(Exception):
 class StrOperate:
     """通过字符串进行操作的基类"""
 
-    # class ModuleNotInModules(Exception):
-    #
-    #     def __init__(self, error):
-    #         self.error = error
-    #
-    #     def __str__(self):
-    #         return f'模式{self.error}不存在'
-    #
-    # def __init__(self, module):
-    #     if module in modules:
-    #         self.__module = module
-    #     else:
-    #         raise self.ModuleNotInModules(module)
+    def __get(self, name, _o=None):
+        if _o is None:
+            _o = self
+            name = name.split('.')
+        name_ = name[0]
+        if name_ in _o.__dict__:
+            if len(name) == 1:
+                return _o.__dict__[name_]
+            else:
+                return self.__get(name[1:], _o.__dict__[name_])
+        if len(name) == 1:
+            return getattr(_o, name_)
+        return self.__get(name[1:], getattr(_o, name_))
 
-    def get_attr(self, name):
+    def exist_attr(self, name: str):
+        # print(name)
+        return True
+
+    def get_attr_str(self, name: str):
+        n = self.get_attr(name)
+        return str(n)
+
+    def get_attr(self, name: str):
         """获取变量的值或方法的对象
 
         :param name: 变量名或方法名(当有变量名等于方法名时，方法将会被变量覆盖)
         :return: 变量的值或方法的对象
         """
-        if name in self.__dict__:
-            return self.__dict__[name]
-        else:
-            try:
-                return getattr(self, name)
-            except AttributeError:
-                raise NameError(f"name '{name}' is not defined")
-
-    def set_attr(self, name, value):
-        """设置变量的值
-
-        :param name: 变量的名称
-        :param value: 要设置的值
-        """
-        self.__dict__[name] = value
-
-    def del_attr(self, name):
-        """删除变量
-
-        :param name: 变量的名称
-        """
-        del self.__dict__[name]
+        return str(self.__get(name))
 
     def transfer(self, name, *args, **kwargs):
         """调用方法
@@ -149,14 +122,7 @@ class StrOperate:
         :param kwargs: 方法参数
         :return: 方法返回值
         """
-        n = getattr(self, name, None)
-        if n is not None:
-            n = n(*args, **kwargs)
-            return n
-        else:
-            if name in self.__dict__:
-                return self.__dict__[name](*args, **kwargs)
-            raise NameError(f"name '{name}' is not defined")
+        return self.__get(name)(*args, **kwargs)
 
 
 class BeingControlSide(StrOperate):
@@ -193,11 +159,8 @@ class BeingControlSide(StrOperate):
                 # print(str(n, 'utf-8'))
                 # n = loads(n)
                 try:
-                    n = self.transfer(n['module'], *n.get('args', []), **n.get('kwargs', {}))
-                    if isinstance(n, (dict, list, tuple, str, int, float, bool)) or n is None:
-                        n = {'module': 'return', 'args': n}
-                    else:
-                        n = {'module': 'call', 'args': n.__name__}
+                    n = {'module': 'return',
+                         'args': self.transfer(n['module'], *n.get('args', []), **n.get('kwargs', {}))}
                 except BaseException as e:
                     n = {'module': 'error', 'args': f'{e.__class__.__name__}: {e}'}
                 sendall(self.s, n)
@@ -243,40 +206,51 @@ class BeingControlSide(StrOperate):
             sendall(self.s, n)
             return self.__return_data(recv(self.s))
 
-    # def print(self, *args, **kwargs):
-    #     """在控制端输出
-    #
-    #     :param args: 参数(与print一样)
-    #     :param kwargs: 参数(与print一样)
-    #     :return: 返回值(与print一样)
-    #     """
-    #     sendall(self.s, {'module': 'print', 'args': args, 'kwargs': kwargs})
-    #     return self.__return_data(recv(self.s))
-    #
-    # def input(self, *args, **kwargs):
-    #     """在控制端输出
-    #
-    #     :param args: 参数(与input一样)
-    #     :param kwargs: 参数(与input一样)
-    #     :return: 返回值(与input一样)
-    #     """
-    #     sendall(self.s, {'module': 'input', 'args': args, 'kwargs': kwargs})
-    #     return self.__return_data(recv(self.s))
-
 
 class Call:
 
     def __init__(self, s, name):
         self.name = name
         self.s = s
+        self._self = False
 
     def __call__(self, *args, **kwargs):
+        self._self = True
         sendall(self.s, {'module': self.name, 'args': args, 'kwargs': kwargs})
-        n = recv(self.s)
+        n = self.__return_data(recv(self.s))
+        self._self = False
+        return n
+
+    def __str__(self):
+        self._self = True
+        n = self.__control('get_attr_str', self.name, _self=True)
+        self._self = False
+        return n
+
+    def __control(self, control, *args, _self=False, **kwargs):
+        """发送指令"""
+        if not _self:
+            self._self = True
+        sendall(self.s, {'module': control, 'args': args, 'kwargs': kwargs})
+        n = self.__return_data(recv(self.s))
+        if not _self:
+            self._self = False
+        return n
+
+    def __return_data(self, n):
         if n['module'] == 'return':
             return n['args']
         elif n['module'] == 'error':
             raise LongRangeError(n['args'])
+
+    def __getattribute__(self, item):
+        if super().__getattribute__('_self'):
+            return super().__getattribute__(item)
+        self._self = True
+        self.__control('exist_attr', f'{self.name}.{item}', _self=True)
+        n = Call(self.s, f'{self.name}.{item}')
+        self._self = False
+        return n
 
 
 class ControlSide:
@@ -287,59 +261,43 @@ class ControlSide:
 
         :param s: 套接字
         """
-        self.run = False
         self.s = s
-        self.run = True
+        self._self = False
 
     def __del__(self):
+        self._self = True
         sleep(0.1)
         sendall(self.s, {'module': '_stop'})
         self.s.close()
+        self._self = False
 
-    def __control(self, control, *args, **kwargs):
+    def __control(self, control, *args, _self: bool = False, **kwargs):
         """发送指令"""
+        if not _self:
+            self._self = True
         sendall(self.s, {'module': control, 'args': args, 'kwargs': kwargs})
-        return self.__return_data(recv(self.s))
+        n = self.__return_data(recv(self.s))
+        if not _self:
+            self._self = False
+        return n
 
     def __return_data(self, n):
         if n['module'] == 'return':
             return n['args']
         elif n['module'] == 'error':
             raise LongRangeError(n['args'])
-        elif n['module'] == 'call':
-            return Call(self.s, n['args'])
-        # else:
-        #     n_ = getattr(self, n['module'], None)
-        #     if n_ is None:
-        #         if n['module'] in self.__dict__:
-        #             try:
-        #                 # print(n.get('args', []), n.get('kwargs', {}))
-        #                 n = {'module': 'return',
-        #                      'arg': self.__dict__[n['module']](*n.get('args', []), **n.get('kwargs', {}))}
-        #             except BaseException as e:
-        #                 n = {'module': 'error', 'args': f'{e.__class__.__name__}: {e}'}
-        #         else:
-        #             n = {'module': 'error', 'args': f"NameError: name '{n['module']}' is not defined"}
-        #     else:
-        #         n = {'module': 'return',
-        #              'arg': getattr(self, n['module'])(*n.get('args', []), **n.get('kwargs', {}))}
-        #     sendall(self.s, n)
-        #     return self.__return_data(recv(self.s))
 
-    def __getattr__(self, item):
-        return self.__control('get_attr', item)
-
-    def __setattr__(self, key, value):
-        if key == 'run':
-            super().__setattr__(key, value)
-        else:
-            if super().__getattribute__('run'):
-                return self.__control('set_attr', key, value)
-            else:
-                super().__setattr__(key, value)
-
-    def __delattr__(self, item):
-        return self.__control('del_attr', item)
+    def __getattribute__(self, item):
+        if super().__getattribute__('_self'):
+            n = super().__getattribute__(item)
+            return n
+        self._self = True
+        # print(item)
+        self.__control('exist_attr', item, _self=True)
+        n = Call(self.s, item)
+        self._self = False
+        return n
+        # return
 
 
 class SERVER:
@@ -374,7 +332,7 @@ class SERVER:
             self.s.settimeout(accept_time_out)
             try:
                 s, address = self.s.accept()
-            except socket.timeout:
+            except timeout:
                 continue
             # 要验证
             if security_function is not None:
@@ -410,7 +368,8 @@ class SERVER:
         self.s.settimeout(None)
 
 
-def client(ip, port, security_function=None, timeout=10, channel=ControlSide) -> Union[ControlSide, BeingControlSide, bool]:
+def client(ip, port, security_function=None, timeout=10, channel=ControlSide) -> Union[
+    ControlSide, BeingControlSide, bool]:
     """连接
 
     :param ip: 被连接方ip
