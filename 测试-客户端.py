@@ -5,7 +5,7 @@ from RemoteFunction import *
 
 def main():
     # 在client的第一个空字符串里填入自己的ip
-    s1 = client('', 10000, '1234567890')
+    s1 = client('192.168.0.103', 10000, '1234567890')
     if not s1:
         return
     print(s1.a.c)
@@ -13,7 +13,8 @@ def main():
     print(s1.a.b)
     s1.a.a.b()
     print(s1.a)
-    s1.b()
+    s1.a.d('a')
+    # s1.b()
 
 
 if __name__ == '__main__':
